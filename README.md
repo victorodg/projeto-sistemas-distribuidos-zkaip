@@ -43,6 +43,13 @@ segunda instância a partir de uma cópia da pasta do projeto (ou defina uma
 pasta de dados separada — veja "Múltiplas instâncias" abaixo). Supondo uma
 cópia em `zkaip-b/`:
 
+> ⚠️ **Faça a cópia antes de rodar o peer original pela primeira vez**, ou
+> apague `zkaip-b/data/peer.json` antes de rodar. Se `zkaip-b/data/` for
+> copiado depois que o peer original já rodou (e já tiver `peer.json`
+> salvo), a cópia herda o mesmo `peerId` e a mesma porta — o programa
+> carrega esse arquivo e não pergunta a porta de novo, achando que já é
+> aquele peer. Veja "Múltiplas instâncias" abaixo.
+
 ```bash
 python main.py
 ```
@@ -99,10 +106,22 @@ Sair:
 
 ## Múltiplas instâncias na mesma máquina
 
-Cada instância grava seu estado em `zkaip/data/`. Para rodar mais de um peer
-na mesma máquina/pasta, use uma cópia do diretório do projeto por peer (ex:
+Cada instância grava seu estado (identidade, grupos, mensagens) em
+`zkaip/data/`, começando por `data/peer.json` — é esse arquivo que guarda o
+`peerId` e a porta escolhidos na primeira execução. Para rodar mais de um
+peer na mesma máquina, use uma cópia do diretório do projeto por peer (ex:
 `zkaip-a/`, `zkaip-b/`, `zkaip-c/`), cada um escutando em uma porta
 diferente (5001, 5002, 5003, ...). Todos usam `127.0.0.1` como host.
+
+**Cuidado com a ordem**: como `data/` não faz parte do repositório Git
+(está no `.gitignore`), uma cópia feita via `git clone` sempre começa sem
+`peer.json` e pede a porta normalmente. Mas se você copiar a pasta
+manualmente pelo sistema de arquivos (ex: "copiar e colar" no Explorer)
+*depois* de já ter rodado aquele peer ao menos uma vez, o `data/peer.json`
+já existente é copiado junto — e a cópia vai carregar o mesmo `peerId` e a
+mesma porta salvos ali, sem perguntar nada. Para evitar isso, copie a pasta
+**antes** da primeira execução, ou apague `data/peer.json` (ou a pasta
+`data/` inteira) da cópia antes de rodar `python main.py` nela.
 
 ## Comandos da CLI
 
