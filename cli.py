@@ -3,28 +3,42 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from connection import ConnectionState
 from models import build_envelope
 
+HISTORY_ON_CHOOSE = 20
+
 
 class CLI:
     """User input loop (runs on the main thread) + display of messages
-    arriving from network threads."""
+    arriving from network threads.
 
-    PROMPT = "> "
+    The CLI always has at most one "active" group (set via /choose); /msg
+    and /send act on it implicitly, like switching into that group's
+    screen in a normal chat app. Messages for other groups still show up
+    live, tagged with their group name so they aren't confused with the
+    active screen's conversation."""
 
     def __init__(self, peer):
         self.peer = peer
         self._print_lock = threading.Lock()
         self._running = True
+        self.current_group_id: Optional[str] = None
 
-    # -- output --------------------------------------------------------
+    # -- prompt / output --------------------------------------------------
+
+    def _current_prompt(self) -> str:
+        if self.current_group_id:
+            group = self.peer.group_manager.get(self.current_group_id)
+            if group:
+                return f"[{group.name}]> "
+        return "> "
 
     def _print_line(self, line: str) -> None:
         with self._print_lock:
-            sys.stdout.write("\r\033[K" + line + "\n" + self.PROMPT)
+            sys.stdout.write("\r\033[K" + line + "\n" + self._current_prompt())
             sys.stdout.flush()
 
     def notify(self, text: str) -> None:
@@ -36,21 +50,26 @@ class CLI:
         sent_at = envelope["sentAt"]
         content = envelope["payload"].get("content", "")
         t = time.strftime("%H:%M", time.localtime(sent_at / 1000))
-        name = "you" if self_sent else from_id[:8]
+        name = "você" if self_sent else self.peer.display_name(from_id)
         tag = " [recuperada]" if recovered else ""
-        group_tag = group_id[:8] if group_id else "?"
-        self._print_line(f"[{t}] {name} ({group_tag}){tag}: {content}")
+
+        if group_id == self.current_group_id:
+            self._print_line(f"[{t}] {name}{tag}: {content}")
+        else:
+            group = self.peer.group_manager.get(group_id)
+            group_name = group.name if group else "?"
+            self._print_line(f"[{t}] ({group_name}) {name}{tag}: {content}")
 
     # -- input loop ------------------------------------------------------
 
     def run(self) -> None:
-        print(f"zKAIP — peer {self.peer.peer_id[:8]} escutando na porta {self.peer.port}")
-        print("Comandos: /create <host> <porta> | /add <groupId> <host> <porta> | "
-              "/msg <groupId> <texto> | /send <groupId> <caminho> | /groups | "
-              "/accept <fileId> | /reject <fileId> | /leave <groupId> | /quit")
+        print(f"zKAIP — {self.peer.username} (porta {self.peer.port})")
+        print("Comandos: /create <nome> <host> <porta> | /add <nome> <host> <porta> | "
+              "/choose <nome> | /msg <texto> | /send <caminho> | /groups | "
+              "/accept <fileId> | /reject <fileId> | /leave [nome] | /quit")
         while self._running:
             try:
-                line = input(self.PROMPT)
+                line = input(self._current_prompt())
             except (EOFError, KeyboardInterrupt):
                 self.cmd_quit()
                 break
@@ -69,28 +88,31 @@ class CLI:
 
         if cmd == "/create":
             args = rest.split()
-            if len(args) != 2:
-                print("uso: /create <host> <porta>")
-                return
-            self.cmd_create(args[0], args[1])
-        elif cmd == "/add":
-            args = rest.split(maxsplit=2)
             if len(args) != 3:
-                print("uso: /add <groupId> <host> <porta>")
+                print("uso: /create <nome> <host> <porta>")
+                return
+            self.cmd_create(args[0], args[1], args[2])
+        elif cmd == "/add":
+            args = rest.split()
+            if len(args) != 3:
+                print("uso: /add <nome> <host> <porta>")
                 return
             self.cmd_add(args[0], args[1], args[2])
+        elif cmd == "/choose":
+            if not rest:
+                print("uso: /choose <nome>")
+                return
+            self.cmd_choose(rest.strip())
         elif cmd == "/msg":
-            args = rest.split(maxsplit=1)
-            if len(args) != 2:
-                print("uso: /msg <groupId> <texto>")
+            if not rest:
+                print("uso: /msg <texto>")
                 return
-            self.cmd_msg(args[0], args[1])
+            self.cmd_msg(rest)
         elif cmd == "/send":
-            args = rest.split(maxsplit=1)
-            if len(args) != 2:
-                print("uso: /send <groupId> <caminho>")
+            if not rest:
+                print("uso: /send <caminho>")
                 return
-            self.cmd_send(args[0], args[1])
+            self.cmd_send(rest.strip())
         elif cmd == "/groups":
             self.cmd_groups()
         elif cmd == "/accept":
@@ -104,10 +126,7 @@ class CLI:
                 return
             self.cmd_reject(rest.strip())
         elif cmd == "/leave":
-            if not rest:
-                print("uso: /leave <groupId>")
-                return
-            self.cmd_leave(rest.strip())
+            self.cmd_leave(rest.strip() if rest else None)
         elif cmd == "/quit":
             self.cmd_quit()
         else:
@@ -115,7 +134,13 @@ class CLI:
 
     # -- commands --------------------------------------------------------
 
-    def cmd_create(self, host: str, port_str: str) -> None:
+    def cmd_create(self, name: str, host: str, port_str: str) -> None:
+        if " " in name or "\t" in name:
+            print("o nome do grupo não pode conter espaços")
+            return
+        if self.peer.group_manager.has_exact_name(name):
+            print(f"você já tem um grupo chamado '{name}'")
+            return
         try:
             port = int(port_str)
         except ValueError:
@@ -127,15 +152,16 @@ class CLI:
             return
         group_id = str(uuid.uuid4())
         members = [
-            {"peerId": self.peer.peer_id, "host": self.peer.host, "port": self.peer.port},
-            {"peerId": conn.remote_peer_id, "host": host, "port": port},
+            {"peerId": self.peer.peer_id, "host": self.peer.host, "port": self.peer.port, "username": self.peer.username},
+            {"peerId": conn.remote_peer_id, "host": host, "port": port, "username": conn.remote_username or conn.remote_peer_id[:8]},
         ]
-        self.peer.group_manager.create_or_update_group(group_id, self.peer.peer_id, members)
-        conn.send(build_envelope(self.peer, "CREATE_GROUP", None, {"groupId": group_id, "members": members}))
-        print(f"grupo criado: {group_id[:8]} (completo: {group_id})")
+        self.peer.group_manager.create_or_update_group(group_id, self.peer.peer_id, name, members)
+        conn.send(build_envelope(self.peer, "CREATE_GROUP", None,
+                                  {"groupId": group_id, "groupName": name, "members": members}))
+        print(f"grupo '{name}' criado com {conn.remote_username or conn.remote_peer_id[:8]}")
 
-    def cmd_add(self, group_id_prefix: str, host: str, port_str: str) -> None:
-        group = self.peer.group_manager.resolve(group_id_prefix)
+    def cmd_add(self, name: str, host: str, port_str: str) -> None:
+        group = self.peer.group_manager.resolve_by_name(name)
         if not group:
             print("grupo não encontrado")
             return
@@ -152,42 +178,55 @@ class CLI:
             print(f"falha ao conectar em {host}:{port}")
             return
 
-        old_members = list(group.members)
-        new_member = {"peerId": conn.remote_peer_id, "host": host, "port": port}
-        all_members = [m.to_dict() for m in old_members] + [new_member]
+        new_member = {"peerId": conn.remote_peer_id, "host": host, "port": port,
+                      "username": conn.remote_username or conn.remote_peer_id[:8]}
+        all_members = [m.to_dict() for m in group.members] + [new_member]
         self.peer.group_manager.set_members(group.group_id, all_members)
 
-        conn.send(build_envelope(self.peer, "ADD_MEMBER", group.group_id,
-                                  {"groupId": group.group_id, "allMembers": all_members}))
-
-        for m in old_members:
-            if m.peer_id == self.peer.peer_id:
+        envelope = build_envelope(self.peer, "ADD_MEMBER", group.group_id, {
+            "groupId": group.group_id,
+            "groupName": group.name,
+            "creatorId": group.creator_id,
+            "newMember": new_member,
+            "allMembers": all_members,
+        })
+        for m in all_members:
+            if m["peerId"] == self.peer.peer_id:
                 continue
-            existing_conn = self.peer.get_connection(m.peer_id)
-            envelope = build_envelope(self.peer, "ADD_MEMBER", group.group_id,
-                                       {"groupId": group.group_id, "newMember": new_member})
+            existing_conn = self.peer.get_connection(m["peerId"])
             if existing_conn and existing_conn.state == ConnectionState.ONLINE:
                 existing_conn.send(envelope)
             else:
-                self.peer.ensure_connected(m.peer_id, m.host, m.port, then_send=envelope)
+                self.peer.ensure_connected(m["peerId"], m["host"], m["port"], then_send=envelope)
 
-        print(f"membro {conn.remote_peer_id[:8]} adicionado ao grupo {group.group_id[:8]}")
+        print(f"'{new_member['username']}' adicionado ao grupo '{group.name}'")
 
-    def cmd_msg(self, group_id_prefix: str, text: str) -> None:
-        group = self.peer.group_manager.resolve(group_id_prefix)
+    def cmd_choose(self, name: str) -> None:
+        group = self.peer.group_manager.resolve_by_name(name)
         if not group:
-            print("grupo não encontrado")
+            print(f"grupo '{name}' não encontrado")
             return
+        self.current_group_id = group.group_id
+        print(f"--- {group.name} ---")
+        history = self.peer.group_manager.get_messages(group.group_id)
+        for envelope in history[-HISTORY_ON_CHOOSE:]:
+            self.display_message(envelope)
+
+    def cmd_msg(self, text: str) -> None:
+        if not self.current_group_id:
+            print("nenhum grupo selecionado. use /choose <nome> primeiro.")
+            return
+        group = self.peer.group_manager.get(self.current_group_id)
         envelope = build_envelope(self.peer, "CHAT_MSG", group.group_id, {"content": text})
         self.peer.group_manager.add_message(group.group_id, envelope)
         self.peer.broadcast_to_group(group.group_id, envelope)
         self.display_message(envelope, self_sent=True)
 
-    def cmd_send(self, group_id_prefix: str, path_str: str) -> None:
-        group = self.peer.group_manager.resolve(group_id_prefix)
-        if not group:
-            print("grupo não encontrado")
+    def cmd_send(self, path_str: str) -> None:
+        if not self.current_group_id:
+            print("nenhum grupo selecionado. use /choose <nome> primeiro.")
             return
+        group = self.peer.group_manager.get(self.current_group_id)
         path = Path(path_str)
         if not path.is_file():
             print("arquivo não encontrado")
@@ -202,7 +241,7 @@ class CLI:
         envelope = build_envelope(self.peer, "FILE_OFFER", group.group_id,
                                    {"fileId": file_id, "fileName": path.name, "fileSize": file_size})
         self.peer.broadcast_to_group(group.group_id, envelope)
-        print(f"arquivo '{path.name}' ({file_size} bytes) oferecido ao grupo {group.group_id[:8]}")
+        print(f"arquivo '{path.name}' ({file_size} bytes) oferecido ao grupo '{group.name}'")
 
     def cmd_groups(self) -> None:
         groups = self.peer.group_manager.list_groups()
@@ -210,16 +249,18 @@ class CLI:
             print("nenhum grupo.")
             return
         for g in groups:
+            marker = " (atual)" if g.group_id == self.current_group_id else ""
             creator_tag = " (você é o criador)" if g.creator_id == self.peer.peer_id else ""
-            print(f"grupo {g.group_id[:8]}{creator_tag}")
+            print(f"grupo '{g.name}'{marker}{creator_tag}")
             for m in g.members:
                 if m.peer_id == self.peer.peer_id:
-                    print(f"  - {m.peer_id[:8]} (você) @ {m.host}:{m.port} [local]")
+                    print(f"  - você @ {m.host}:{m.port} [local]")
                     continue
+                name = self.peer.display_name(m.peer_id)
                 conn = self.peer.get_connection(m.peer_id)
                 online = conn is not None and conn.state == ConnectionState.ONLINE
                 status = "online" if online else "offline"
-                print(f"  - {m.peer_id[:8]} @ {m.host}:{m.port} [{status}]")
+                print(f"  - {name} @ {m.host}:{m.port} [{status}]")
 
     def cmd_accept(self, file_id_prefix: str) -> None:
         file_id, transfer = self.peer.resolve_incoming_file(file_id_prefix)
@@ -241,15 +282,23 @@ class CLI:
             self.peer.file_transfers_incoming.pop(file_id, None)
         print(f"arquivo {file_id[:8]} recusado")
 
-    def cmd_leave(self, group_id_prefix: str) -> None:
-        group = self.peer.group_manager.resolve(group_id_prefix)
+    def cmd_leave(self, name: Optional[str]) -> None:
+        if name:
+            group = self.peer.group_manager.resolve_by_name(name)
+        else:
+            if not self.current_group_id:
+                print("nenhum grupo selecionado. use /leave <nome> ou escolha um grupo com /choose primeiro.")
+                return
+            group = self.peer.group_manager.get(self.current_group_id)
         if not group:
             print("grupo não encontrado")
             return
         envelope = build_envelope(self.peer, "LEAVE_GROUP", group.group_id, {"groupId": group.group_id})
         self.peer.broadcast_to_group(group.group_id, envelope)
         self.peer.group_manager.remove_member(group.group_id, self.peer.peer_id)
-        print(f"você saiu do grupo {group.group_id[:8]}")
+        if self.current_group_id == group.group_id:
+            self.current_group_id = None
+        print(f"você saiu do grupo '{group.name}'")
 
     def cmd_quit(self) -> None:
         self._running = False

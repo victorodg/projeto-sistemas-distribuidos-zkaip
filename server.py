@@ -26,6 +26,7 @@ class PeerServer:
                 client_sock, _addr = self.sock.accept()
             except OSError:
                 break
+            client_sock.settimeout(None)
             conn = Connection(client_sock, self.peer, self.dispatcher, initiator=False)
             conn.start()
 

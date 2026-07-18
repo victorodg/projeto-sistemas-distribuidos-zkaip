@@ -37,17 +37,28 @@ class GroupManager:
         with self._lock:
             return self.groups.get(group_id)
 
-    def resolve(self, group_id_or_prefix: str) -> Optional[Group]:
-        """Resolves a full groupId or an 8-char prefix to a Group."""
+    def resolve_by_name(self, name: str) -> Optional[Group]:
+        """Resolves a group by its human-readable name (case-insensitive
+        exact match, falling back to an unambiguous case-insensitive
+        prefix match). Group IDs are internal and never used for lookup
+        from the CLI."""
         with self._lock:
-            if group_id_or_prefix in self.groups:
-                return self.groups[group_id_or_prefix]
-            matches = [g for g in self.groups.values() if g.group_id.startswith(group_id_or_prefix)]
+            name_lower = name.strip().lower()
+            for g in self.groups.values():
+                if g.name.lower() == name_lower:
+                    return g
+            matches = [g for g in self.groups.values() if g.name.lower().startswith(name_lower)]
             return matches[0] if len(matches) == 1 else None
 
-    def create_or_update_group(self, group_id: str, creator_id: str, members: List[Dict[str, Any]]) -> Group:
+    def has_exact_name(self, name: str) -> bool:
         with self._lock:
-            group = Group(group_id=group_id, creator_id=creator_id, members=[MemberInfo.from_dict(m) for m in members])
+            name_lower = name.strip().lower()
+            return any(g.name.lower() == name_lower for g in self.groups.values())
+
+    def create_or_update_group(self, group_id: str, creator_id: str, name: str, members: List[Dict[str, Any]]) -> Group:
+        with self._lock:
+            group = Group(group_id=group_id, creator_id=creator_id, name=name,
+                          members=[MemberInfo.from_dict(m) for m in members])
             self.groups[group_id] = group
             self.messages.setdefault(group_id, [])
             self._persist_groups()
@@ -60,16 +71,6 @@ class GroupManager:
                 return None
             group.members = [MemberInfo.from_dict(m) for m in members]
             self._persist_groups()
-            return group
-
-    def add_member(self, group_id: str, member: Dict[str, Any]) -> Optional[Group]:
-        with self._lock:
-            group = self.groups.get(group_id)
-            if not group:
-                return None
-            if not group.get_member(member["peerId"]):
-                group.members.append(MemberInfo.from_dict(member))
-                self._persist_groups()
             return group
 
     def remove_member(self, group_id: str, peer_id: str) -> Optional[Group]:

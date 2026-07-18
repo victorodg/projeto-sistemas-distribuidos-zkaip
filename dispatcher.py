@@ -40,19 +40,29 @@ class Dispatcher:
         conn.remote_peer_id = payload["peerId"]
         conn.host = payload.get("host", conn.host)
         conn.port = payload.get("port", conn.port)
+        conn.remote_username = payload.get("username") or conn.remote_peer_id[:8]
         conn.mark_online()
-        if not self.peer.register_connection(conn):
-            # Another connection to this same peer is already online (both
-            # sides dialed each other around the same time) - drop this
-            # redundant one and keep the existing one.
+
+        self.peer.usernames[conn.remote_peer_id] = conn.remote_username
+
+        outcome, old_conn = self.peer.register_connection(conn)
+        if old_conn is not None:
+            # A duplicate connection to the same peer is being superseded
+            # by this one (deterministic tie-break) - close it silently,
+            # this isn't a real disconnect.
+            old_conn.close()
+        if outcome == "rejected":
+            # This connection lost the tie-break against an already-online
+            # duplicate - close it silently without replying; the losing
+            # side is symmetrically resolved on the remote peer too.
             conn.close()
             return
 
         if not conn.initiator and not conn.handshake_sent:
             conn.send_handshake()
 
-        if self.peer.cli:
-            self.peer.cli.notify(f"[info] conectado a {conn.remote_peer_id[:8]} ({conn.host}:{conn.port})")
+        if outcome == "new" and self.peer.cli:
+            self.peer.cli.notify(f"[info] conectado a {conn.remote_username} ({conn.host}:{conn.port})")
 
         for group in self.peer.group_manager.groups_with_member(conn.remote_peer_id):
             last_clock = self.peer.group_manager.last_clock(group.group_id)
@@ -67,13 +77,20 @@ class Dispatcher:
 
     # -- groups --------------------------------------------------------------
 
+    def _cache_usernames(self, members) -> None:
+        for m in members:
+            if m.get("username"):
+                self.peer.usernames[m["peerId"]] = m["username"]
+
     def _handle_create_group(self, conn, msg: Dict[str, Any]) -> None:
         payload = msg["payload"]
         group_id = payload["groupId"]
+        group_name = payload.get("groupName") or group_id[:8]
         members = payload["members"]
-        self.peer.group_manager.create_or_update_group(group_id, creator_id=msg["from"], members=members)
+        self._cache_usernames(members)
+        self.peer.group_manager.create_or_update_group(group_id, creator_id=msg["from"], name=group_name, members=members)
         if self.peer.cli:
-            self.peer.cli.notify(f"[info] grupo {group_id[:8]} criado por {msg['from'][:8]}")
+            self.peer.cli.notify(f"[info] grupo '{group_name}' criado por {self.peer.display_name(msg['from'])}")
         for m in members:
             if m["peerId"] != self.peer.peer_id:
                 self.peer.ensure_connected(m["peerId"], m["host"], m["port"])
@@ -81,26 +98,40 @@ class Dispatcher:
     def _handle_add_member(self, conn, msg: Dict[str, Any]) -> None:
         payload = msg["payload"]
         group_id = payload["groupId"]
+        group_name = payload.get("groupName")
+        creator_id = payload.get("creatorId", msg["from"])
         new_member = payload.get("newMember")
-        all_members = payload.get("allMembers")
+        all_members = payload.get("allMembers") or []
 
-        if new_member and new_member["peerId"] != self.peer.peer_id:
-            self.peer.ensure_connected(new_member["peerId"], new_member["host"], new_member["port"])
+        self._cache_usernames(all_members)
+        for m in all_members:
+            if m["peerId"] != self.peer.peer_id:
+                self.peer.ensure_connected(m["peerId"], m["host"], m["port"])
 
-        if all_members is not None:
+        group = self.peer.group_manager.get(group_id)
+        if group is None:
+            # We're the newly-added member and have never heard of this
+            # group before - bootstrap it locally from the full member
+            # list instead of silently dropping the update.
+            if group_name:
+                self.peer.group_manager.create_or_update_group(group_id, creator_id, group_name, all_members)
+        elif all_members:
             self.peer.group_manager.set_members(group_id, all_members)
-        elif new_member is not None:
-            self.peer.group_manager.add_member(group_id, new_member)
 
         if self.peer.cli:
-            who = new_member["peerId"][:8] if new_member else "?"
-            self.peer.cli.notify(f"[info] {who} adicionado ao grupo {group_id[:8]}")
+            who = self.peer.display_name(new_member["peerId"]) if new_member else "alguém"
+            group = self.peer.group_manager.get(group_id)
+            gname = group.name if group else (group_name or group_id[:8])
+            self.peer.cli.notify(f"[info] {who} adicionado ao grupo '{gname}'")
 
     def _handle_leave_group(self, conn, msg: Dict[str, Any]) -> None:
         group_id = msg["payload"]["groupId"]
+        group = self.peer.group_manager.get(group_id)
+        gname = group.name if group else group_id[:8]
+        who = self.peer.display_name(msg["from"])
         self.peer.group_manager.remove_member(group_id, msg["from"])
         if self.peer.cli:
-            self.peer.cli.notify(f"[info] {msg['from'][:8]} saiu do grupo {group_id[:8]}")
+            self.peer.cli.notify(f"[info] {who} saiu do grupo '{gname}'")
 
     # -- chat + sync -----------------------------------------------------
 
@@ -142,7 +173,7 @@ class Dispatcher:
             }
         if self.peer.cli:
             self.peer.cli.notify(
-                f"[info] {msg['from'][:8]} quer enviar o arquivo '{payload['fileName']}' "
+                f"[info] {self.peer.display_name(msg['from'])} quer enviar o arquivo '{payload['fileName']}' "
                 f"({payload['fileSize']} bytes) [fileId {file_id[:8]}]. "
                 f"Use /accept {file_id[:8]} ou /reject {file_id[:8]}"
             )
@@ -157,7 +188,7 @@ class Dispatcher:
         if payload.get("accept"):
             self._send_file_chunks(conn, transfer, file_id)
         elif self.peer.cli:
-            self.peer.cli.notify(f"[info] {msg['from'][:8]} recusou o arquivo {file_id[:8]}")
+            self.peer.cli.notify(f"[info] {self.peer.display_name(msg['from'])} recusou o arquivo {file_id[:8]}")
 
     def _send_file_chunks(self, conn, transfer: Dict[str, Any], file_id: str) -> None:
         import threading
@@ -182,7 +213,8 @@ class Dispatcher:
                     }))
                     index += 1
             if self.peer.cli:
-                self.peer.cli.notify(f"[info] arquivo {file_id[:8]} enviado para {conn.remote_peer_id[:8]}")
+                name = self.peer.display_name(conn.remote_peer_id) if conn.remote_peer_id else "?"
+                self.peer.cli.notify(f"[info] arquivo {file_id[:8]} enviado para {name}")
 
         threading.Thread(target=worker, daemon=True).start()
 

@@ -27,8 +27,8 @@ def load_peer(data_dir: Path) -> Optional[Dict[str, Any]]:
     return _read_json(data_dir / "peer.json")
 
 
-def save_peer(data_dir: Path, peer_id: str, port: int) -> None:
-    _atomic_write_json(data_dir / "peer.json", {"peerId": peer_id, "port": port})
+def save_peer(data_dir: Path, peer_id: str, port: int, username: str) -> None:
+    _atomic_write_json(data_dir / "peer.json", {"peerId": peer_id, "port": port, "username": username})
 
 
 # ---------------------------------------------------------------------------

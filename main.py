@@ -12,29 +12,56 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 
 
-def load_or_create_identity():
-    existing = storage.load_peer(DATA_DIR)
-    if existing:
-        return existing["peerId"], existing["port"]
-
-    peer_id = str(uuid.uuid4())
+def _ask_port() -> int:
     while True:
         raw = input("Porta para escutar conexões: ").strip()
         try:
-            port = int(raw)
-            break
+            return int(raw)
         except ValueError:
             print("porta inválida, tente novamente.")
-    storage.save_peer(DATA_DIR, peer_id, port)
-    return peer_id, port
+
+
+def _ask_username() -> str:
+    while True:
+        raw = input("Escolha seu nome de usuário: ").strip()
+        if raw:
+            return raw
+        print("o nome de usuário não pode ser vazio.")
+
+
+def load_or_create_identity():
+    existing = storage.load_peer(DATA_DIR)
+    if existing:
+        peer_id = existing["peerId"]
+        port = existing["port"]
+        username = existing.get("username")
+        if username:
+            return peer_id, port, username
+    else:
+        peer_id = str(uuid.uuid4())
+        port = _ask_port()
+
+    # Either a brand-new peer, or an older data/peer.json saved before
+    # usernames existed - ask for one now and persist it, keeping the
+    # peerId/port already assigned.
+    username = _ask_username()
+    storage.save_peer(DATA_DIR, peer_id, port, username)
+    return peer_id, port, username
 
 
 def main():
     (DATA_DIR / "messages").mkdir(parents=True, exist_ok=True)
 
-    peer_id, port = load_or_create_identity()
-    peer = Peer(peer_id, DEFAULT_HOST, port, DATA_DIR)
+    peer_id, port, username = load_or_create_identity()
+    peer = Peer(peer_id, DEFAULT_HOST, port, username, DATA_DIR)
     peer.group_manager.load()
+
+    # Seed the display-name cache from saved group membership so offline
+    # peers still show up with a name instead of a raw ID.
+    for group in peer.group_manager.list_groups():
+        for member in group.members:
+            if member.peer_id != peer.peer_id and member.username:
+                peer.usernames[member.peer_id] = member.username
 
     # Reconnect (in background) to every known member of every saved group.
     for group in peer.group_manager.list_groups():

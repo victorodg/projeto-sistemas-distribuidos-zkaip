@@ -13,25 +13,31 @@ class MemberInfo:
     peer_id: str
     host: str
     port: int
+    username: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"peerId": self.peer_id, "host": self.host, "port": self.port}
+        return {"peerId": self.peer_id, "host": self.host, "port": self.port, "username": self.username}
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "MemberInfo":
-        return MemberInfo(peer_id=d["peerId"], host=d["host"], port=d["port"])
+        return MemberInfo(
+            peer_id=d["peerId"], host=d["host"], port=d["port"],
+            username=d.get("username") or d["peerId"][:8],
+        )
 
 
 @dataclass
 class Group:
     group_id: str
     creator_id: str
+    name: str = ""
     members: List[MemberInfo] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "groupId": self.group_id,
             "creatorId": self.creator_id,
+            "name": self.name,
             "members": [m.to_dict() for m in self.members],
         }
 
@@ -40,6 +46,7 @@ class Group:
         return Group(
             group_id=d["groupId"],
             creator_id=d["creatorId"],
+            name=d.get("name") or d["groupId"][:8],
             members=[MemberInfo.from_dict(m) for m in d.get("members", [])],
         )
 

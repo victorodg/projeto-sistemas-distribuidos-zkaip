@@ -63,6 +63,7 @@ class Connection:
         self.initiator = initiator
 
         self.remote_peer_id: Optional[str] = None
+        self.remote_username: Optional[str] = None
         self.state = ConnectionState.CONNECTING
         self.handshake_sent = False
 
@@ -88,6 +89,7 @@ class Connection:
             "peerId": self.peer.peer_id,
             "host": self.peer.host,
             "port": self.peer.port,
+            "username": self.peer.username,
         })
         self.handshake_sent = True
         self.send(envelope)
