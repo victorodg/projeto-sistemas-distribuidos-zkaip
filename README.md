@@ -1,6 +1,6 @@
 # zKAIP
 
-Chat P2P em grupos em que ada peer roda a mesma aplicação;
+Chat P2P em grupos em que cada peer roda a mesma aplicação;
 peers se conectam diretamente uns aos outros via TCP.
 
 Requer apenas Python 3 (nenhuma dependência externa).
