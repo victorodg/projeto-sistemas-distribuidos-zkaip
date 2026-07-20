@@ -41,9 +41,6 @@ def load_or_create_identity():
         peer_id = str(uuid.uuid4())
         port = _ask_port()
 
-    # Either a brand-new peer, or an older data/peer.json saved before
-    # usernames existed - ask for one now and persist it, keeping the
-    # peerId/port already assigned.
     username = _ask_username()
     storage.save_peer(DATA_DIR, peer_id, port, username)
     return peer_id, port, username
@@ -56,14 +53,14 @@ def main():
     peer = Peer(peer_id, DEFAULT_HOST, port, username, DATA_DIR)
     peer.group_manager.load()
 
-    # Seed the display-name cache from saved group membership so offline
-    # peers still show up with a name instead of a raw ID.
+    # Inicializa o cache de nomes de usuário com base nos membros salvos dos grupos, para que peers offline
+    # sejam exibidos pelo nome em vez do ID
     for group in peer.group_manager.list_groups():
         for member in group.members:
             if member.peer_id != peer.peer_id and member.username:
                 peer.usernames[member.peer_id] = member.username
 
-    # Reconnect (in background) to every known member of every saved group.
+    # Reconecta (no background) todos os membros conhecidos de cada grupo salvo.
     for group in peer.group_manager.list_groups():
         for member in group.members:
             if member.peer_id != peer.peer_id:

@@ -5,8 +5,9 @@ from models import build_envelope
 
 
 class Dispatcher:
-    """The only component that knows about every message type. Routes each
-    received envelope to its handler and keeps the Lamport clock in sync."""
+    """O único componente que conhece todos os tipos de mensagem.
+    Direciona cada envelope recebido para o seu respectivo handler
+    e mantém o relógio de Lamport sincronizado."""
 
     def __init__(self, peer):
         self.peer = peer
@@ -33,7 +34,7 @@ class Dispatcher:
             return
         handler(conn, msg)
 
-    # -- handshake / liveness ----------------------------------------------
+    # handshake
 
     def _handle_handshake(self, conn, msg: Dict[str, Any]) -> None:
         payload = msg["payload"]
@@ -47,14 +48,8 @@ class Dispatcher:
 
         outcome, old_conn = self.peer.register_connection(conn)
         if old_conn is not None:
-            # A duplicate connection to the same peer is being superseded
-            # by this one (deterministic tie-break) - close it silently,
-            # this isn't a real disconnect.
             old_conn.close()
         if outcome == "rejected":
-            # This connection lost the tie-break against an already-online
-            # duplicate - close it silently without replying; the losing
-            # side is symmetrically resolved on the remote peer too.
             conn.close()
             return
 
@@ -75,7 +70,7 @@ class Dispatcher:
     def _handle_heartbeat_ack(self, conn, msg: Dict[str, Any]) -> None:
         conn.on_heartbeat_ack()
 
-    # -- groups --------------------------------------------------------------
+    # grupos
 
     def _cache_usernames(self, members) -> None:
         for m in members:
@@ -110,9 +105,6 @@ class Dispatcher:
 
         group = self.peer.group_manager.get(group_id)
         if group is None:
-            # We're the newly-added member and have never heard of this
-            # group before - bootstrap it locally from the full member
-            # list instead of silently dropping the update.
             if group_name:
                 self.peer.group_manager.create_or_update_group(group_id, creator_id, group_name, all_members)
         elif all_members:
@@ -133,7 +125,7 @@ class Dispatcher:
         if self.peer.cli:
             self.peer.cli.notify(f"[info] {who} saiu do grupo '{gname}'")
 
-    # -- chat + sync -----------------------------------------------------
+    # chat + sync
 
     def _handle_chat_msg(self, conn, msg: Dict[str, Any]) -> None:
         group_id = msg["groupId"]
@@ -158,7 +150,7 @@ class Dispatcher:
             if inserted and self.peer.cli:
                 self.peer.cli.display_message(envelope, recovered=True)
 
-    # -- file transfer -----------------------------------------------------
+    # arquivos
 
     def _handle_file_offer(self, conn, msg: Dict[str, Any]) -> None:
         payload = msg["payload"]

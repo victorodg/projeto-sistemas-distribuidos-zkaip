@@ -5,7 +5,7 @@ from connection import Connection
 
 
 class PeerServer:
-    """Accepts incoming TCP connections and hands them off as Connections."""
+    """Aceita conexões TCP de entrada e as encapsula como objetos do tipo Connection."""
 
     def __init__(self, peer, dispatcher):
         self.peer = peer

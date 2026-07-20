@@ -13,8 +13,7 @@ RECONNECT_BACKOFFS = [5, 10, 30]
 
 
 class Peer:
-    """Central state of the local peer: identity, clock, connection table,
-    group manager and file-transfer bookkeeping."""
+    """Estado do peer local: ID, clock, conexões, gerenciamento de grupos e transferência de arquivos"""
 
     def __init__(self, peer_id: str, host: str, port: int, username: str, data_dir: Path):
         self.peer_id = peer_id
@@ -31,10 +30,6 @@ class Peer:
         self.connections: Dict[str, Connection] = {}
         self.connections_lock = threading.RLock()
 
-        # peerId -> username, for display purposes only. IDs are never
-        # shown to the user; this lets us print a name for any peer we've
-        # ever handshaked with or seen listed as a group member, even
-        # while it's offline.
         self.usernames: Dict[str, str] = {}
 
         self._reconnecting = set()
@@ -53,34 +48,20 @@ class Peer:
             return self.username
         return self.usernames.get(peer_id, peer_id[:8])
 
-    # -- connection table --------------------------------------------------
+    # conexões
 
     def register_connection(self, conn: Connection) -> Tuple[str, Optional[Connection]]:
-        """Registers conn as the canonical connection for its remote peer.
+        """Registra conn como a conexão canônica para seu par remoto.
 
-        Two peers can end up dialing each other at nearly the same time,
-        producing two independent TCP connections between the same pair.
-        Deciding which one to keep based on local arrival order is unsafe:
-        each side observes handshakes completing in its own order, so the
-        two peers can each keep a *different* one of the two connections
-        - and since the other side closed "its" loser, both survivors
-        eventually error out, triggering a reconnect, which recreates the
-        same race forever (this was the cause of the repeated "conectado"/
-        "ficou offline" flapping seen when testing two peers locally).
+        Dois pares podem acabar iniciando conexão um com o outro quase ao
+        mesmo tempo, produzindo duas conexões TCP independentes entre o mesmo
+        par de nós.
 
-        Instead we resolve duplicates deterministically: both sides know
-        both peerIds after the handshake, so both independently keep the
-        connection dialed by whichever peerId is smaller. That decision
-        doesn't depend on timing, so both sides always converge on the
-        exact same surviving connection.
-
-        Returns (outcome, old_conn):
-          outcome is "new" (first connection to this peer - caller should
-          notify the user), "replace" (a duplicate resolved in favor of
-          conn - silent, not a real reconnect) or "rejected" (conn is the
-          losing duplicate and must be closed by the caller, silently).
-          old_conn is the connection conn replaced, if any (caller must
-          close it).
+        Resolvemos conexões duplicadas de forma determinística:
+        ambos os lados conhecem os dois peerIds após o handshake, então cada um
+        mantém independentemente a conexão iniciada pelo peer cujo peerId é
+        menor. Essa decisão não depende da ordem dos eventos, portanto ambos os
+        lados sempre convergem para exatamente a mesma conexão sobrevivente.
         """
         with self.connections_lock:
             existing = self.connections.get(conn.remote_peer_id)
@@ -108,17 +89,13 @@ class Peer:
         if conn.remote_peer_id and self.cli:
             self.cli.notify(f"[info] {self.display_name(conn.remote_peer_id)} ficou offline")
 
-    # -- outgoing connections ------------------------------------------
+    # conexões para outros peers
 
     def connect_to(self, host: str, port: int) -> Optional[Connection]:
         try:
             sock = socket.create_connection((host, port), timeout=5)
         except OSError:
             return None
-        # socket.create_connection(..., timeout=5) leaves that 5s timeout
-        # permanently attached to the socket - without resetting it here,
-        # recv() would raise a timeout (treated as a dead connection) after
-        # every 5s of normal idle chat, causing endless reconnect flapping.
         sock.settimeout(None)
         conn = Connection(sock, self, self.dispatcher, host=host, port=port, initiator=True)
         conn.start()
@@ -172,7 +149,7 @@ class Peer:
             with self._reconnecting_lock:
                 self._reconnecting.discard((host, port))
 
-    # -- group broadcasting -----------------------------------------------
+    # broadcasting a nível de grupo
 
     def broadcast_to_group(self, group_id: str, envelope: Dict[str, Any], exclude_peer_id: Optional[str] = None) -> None:
         group = self.group_manager.get(group_id)
@@ -188,7 +165,7 @@ class Peer:
             else:
                 self.ensure_connected(m.peer_id, m.host, m.port, then_send=envelope)
 
-    # -- file transfer lookups -------------------------------------------
+    # transferência de arquivos
 
     def resolve_incoming_file(self, file_id_prefix: str):
         with self.file_transfers_lock:
@@ -199,7 +176,7 @@ class Peer:
                 return matches[0], self.file_transfers_incoming[matches[0]]
             return None, None
 
-    # -- shutdown -----------------------------------------------------------
+    # fechamento do programa
 
     def shutdown(self) -> None:
         self.shutting_down = True

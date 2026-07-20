@@ -8,26 +8,26 @@ from typing import Any, Dict, Optional
 from connection import ConnectionState
 from models import build_envelope
 
+# Número de mensagens no histórico do grupo selecionado
 HISTORY_ON_CHOOSE = 20
 
 
 class CLI:
-    """User input loop (runs on the main thread) + display of messages
-    arriving from network threads.
+    """Loop principal de entrada do usuário (executado na thread principal)
+    e exibição das mensagens recebidas pelas threads de rede.
 
-    The CLI always has at most one "active" group (set via /choose); /msg
-    and /send act on it implicitly, like switching into that group's
-    screen in a normal chat app. Messages for other groups still show up
-    live, tagged with their group name so they aren't confused with the
-    active screen's conversation."""
+    Mantém no máximo um grupo ativo (definido por /choose). Os
+    comandos /msg e /send atuam implicitamente sobre esse grupo,
+    como se fossem enviados /msg [nomeGrupo] e /send [nomeGrupo].
+    Mensagens de outros grupos continuam sendo exibidas em tempo real,
+    identificadas pelo nome do grupo para evitar confusão com a conversa ativa.
+    """
 
     def __init__(self, peer):
         self.peer = peer
         self._print_lock = threading.Lock()
         self._running = True
         self.current_group_id: Optional[str] = None
-
-    # -- prompt / output --------------------------------------------------
 
     def _current_prompt(self) -> str:
         if self.current_group_id:
@@ -60,13 +60,13 @@ class CLI:
             group_name = group.name if group else "?"
             self._print_line(f"[{t}] ({group_name}) {name}{tag}: {content}")
 
-    # -- input loop ------------------------------------------------------
+    # input loop
 
     def run(self) -> None:
         print(f"zKAIP — {self.peer.username} (porta {self.peer.port})")
-        print("Comandos: /create <nome> <host> <porta> | /add <nome> <host> <porta> | "
-              "/choose <nome> | /msg <texto> | /send <caminho> | /groups | "
-              "/accept <fileId> | /reject <fileId> | /leave [nome] | /quit")
+        print("Comandos: /create <nomeGrupo> <host> <porta> | /add <nomeGrupo> <host> <porta> | "
+              "/choose <nomeGrupo> | /msg <texto> | /send <caminho> | /groups | "
+              "/accept <arquivoId> | /reject <arquivoId> | /leave <[>nomeGrupo> | /quit")
         while self._running:
             try:
                 line = input(self._current_prompt())
@@ -89,18 +89,18 @@ class CLI:
         if cmd == "/create":
             args = rest.split()
             if len(args) != 3:
-                print("uso: /create <nome> <host> <porta>")
+                print("uso: /create <nomeGrupo> <host> <porta>")
                 return
             self.cmd_create(args[0], args[1], args[2])
         elif cmd == "/add":
             args = rest.split()
             if len(args) != 3:
-                print("uso: /add <nome> <host> <porta>")
+                print("uso: /add <nomeGrupo> <host> <porta>")
                 return
             self.cmd_add(args[0], args[1], args[2])
         elif cmd == "/choose":
             if not rest:
-                print("uso: /choose <nome>")
+                print("uso: /choose <nomeGrupo>")
                 return
             self.cmd_choose(rest.strip())
         elif cmd == "/msg":
@@ -132,7 +132,7 @@ class CLI:
         else:
             print(f"comando desconhecido: {cmd}")
 
-    # -- commands --------------------------------------------------------
+    # comandos
 
     def cmd_create(self, name: str, host: str, port_str: str) -> None:
         if " " in name or "\t" in name:
@@ -214,7 +214,7 @@ class CLI:
 
     def cmd_msg(self, text: str) -> None:
         if not self.current_group_id:
-            print("nenhum grupo selecionado. use /choose <nome> primeiro.")
+            print("nenhum grupo selecionado. use /choose <nomeGrupo> primeiro.")
             return
         group = self.peer.group_manager.get(self.current_group_id)
         envelope = build_envelope(self.peer, "CHAT_MSG", group.group_id, {"content": text})
@@ -224,7 +224,7 @@ class CLI:
 
     def cmd_send(self, path_str: str) -> None:
         if not self.current_group_id:
-            print("nenhum grupo selecionado. use /choose <nome> primeiro.")
+            print("nenhum grupo selecionado. use /choose <nomeGrupo> primeiro.")
             return
         group = self.peer.group_manager.get(self.current_group_id)
         path = Path(path_str)
@@ -287,7 +287,7 @@ class CLI:
             group = self.peer.group_manager.resolve_by_name(name)
         else:
             if not self.current_group_id:
-                print("nenhum grupo selecionado. use /leave <nome> ou escolha um grupo com /choose primeiro.")
+                print("nenhum grupo selecionado. use /leave <nomeGrupo> ou escolha um grupo com /choose primeiro.")
                 return
             group = self.peer.group_manager.get(self.current_group_id)
         if not group:

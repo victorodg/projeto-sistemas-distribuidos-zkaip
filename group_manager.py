@@ -7,7 +7,7 @@ from models import Group, MemberInfo
 
 
 class GroupManager:
-    """Owns groups, membership and message history. Never touches sockets."""
+    """Lida com grupos, mbembros e histórico de mensagens. Não vê sockets."""
 
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
@@ -15,7 +15,7 @@ class GroupManager:
         self.groups: Dict[str, Group] = {}
         self.messages: Dict[str, List[Dict[str, Any]]] = {}
 
-    # -- persistence ---------------------------------------------------
+    # presistência
 
     def load(self) -> None:
         with self._lock:
@@ -27,7 +27,7 @@ class GroupManager:
     def _persist_groups(self) -> None:
         storage.save_groups(self.data_dir, [g.to_dict() for g in self.groups.values()])
 
-    # -- groups ----------------------------------------------------------
+    # grupos
 
     def list_groups(self) -> List[Group]:
         with self._lock:
@@ -38,10 +38,6 @@ class GroupManager:
             return self.groups.get(group_id)
 
     def resolve_by_name(self, name: str) -> Optional[Group]:
-        """Resolves a group by its human-readable name (case-insensitive
-        exact match, falling back to an unambiguous case-insensitive
-        prefix match). Group IDs are internal and never used for lookup
-        from the CLI."""
         with self._lock:
             name_lower = name.strip().lower()
             for g in self.groups.values():
@@ -91,12 +87,10 @@ class GroupManager:
         with self._lock:
             return [g for g in self.groups.values() if g.get_member(peer_id)]
 
-    # -- messages ----------------------------------------------------------
+    # mensagens
 
     def add_message(self, group_id: str, envelope: Dict[str, Any], dedupe: bool = False) -> bool:
-        """Appends a message envelope, keeping history sorted by clock.
-        Returns True if the message was actually inserted (False if it was a
-        duplicate and dedupe=True)."""
+        """Retorna TRUE se a mensagem foi de fato inserida e FALSE se foi duplicata"""
         with self._lock:
             history = self.messages.setdefault(group_id, [])
             if dedupe and any(m.get("msgId") == envelope.get("msgId") for m in history):

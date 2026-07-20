@@ -9,9 +9,10 @@ from models import build_envelope
 
 
 # ---------------------------------------------------------------------------
-# Framing: 4-byte big-endian length prefix + UTF-8 JSON payload.
-# TCP does not preserve message boundaries, so every message must be
-# length-prefixed on the wire.
+# Estrutura das mensagens: prefixo de 4 bytes (big-endian) indicando o
+# tamanho, seguido do conteúdo em JSON codificado em UTF-8.
+# Como o TCP não preserva os limites entre mensagens, cada mensagem
+# precisa ser enviada com esse prefixo de tamanho.
 # ---------------------------------------------------------------------------
 
 def send_msg(sock: socket.socket, obj: Dict[str, Any]) -> None:
@@ -49,9 +50,9 @@ HEARTBEAT_RETRIES = 3
 
 
 class Connection:
-    """Manages a single persistent TCP connection: a dedicated read thread,
-    a dedicated write thread consuming a queue, and heartbeat/reconnection
-    logic. Knows nothing about groups."""
+    """Gerencia uma única conexão TCP persistente. Uma thread de leitura dedicada,
+    uma thread de escrita dedicada que consome uma fila, e lógica de heartbeat
+    e reconexão. Não tem informações sobre grupos."""
 
     def __init__(self, sock: socket.socket, peer, dispatcher, host: Optional[str] = None,
                  port: Optional[int] = None, initiator: bool = False):
@@ -74,7 +75,7 @@ class Connection:
         self._hb_acked = threading.Event()
         self.online_event = threading.Event()
 
-    # -- lifecycle -----------------------------------------------------
+    # controle do ciclo de vida da conexão
 
     def start(self) -> None:
         self.state = ConnectionState.HANDSHAKING
@@ -95,7 +96,7 @@ class Connection:
         self.send(envelope)
 
     def send(self, obj: Dict[str, Any]) -> None:
-        """Enqueues a message for sending; never blocks the caller."""
+        """Adiciona uma mensagem à fila de envio sem bloquear a thread chamadora."""
         self.send_queue.put(obj)
 
     def mark_online(self) -> None:
@@ -108,7 +109,7 @@ class Connection:
     def on_heartbeat_ack(self) -> None:
         self._hb_acked.set()
 
-    # -- threads ---------------------------------------------------------
+    # threads
 
     def _write_loop(self) -> None:
         while not self._stop.is_set():
@@ -131,11 +132,11 @@ class Connection:
                 return
             try:
                 self.dispatcher.handle(self, msg)
-            except Exception as e:  # keep the read loop alive on handler bugs
+            except Exception as e:  # mantém a thread de leitura em execução mesmo se ocorrer um erro
                 print(f"\r\033[K[error] handling message: {e}")
 
     def _heartbeat_loop(self) -> None:
-        # Wait for the connection to come online before heartbeating.
+        # aguarda a conexão ficar online antes de iniciar o envio de heartbeats
         while not self._stop.is_set():
             time.sleep(HEARTBEAT_INTERVAL)
             if self._stop.is_set():
@@ -154,7 +155,7 @@ class Connection:
                 return True
         return False
 
-    # -- disconnect / reconnect -----------------------------------------
+    # tratamento de desconexão e reconexão
 
     def _handle_disconnect(self) -> None:
         with self._disconnect_lock:

@@ -62,8 +62,7 @@ class Group:
 
 @dataclass
 class Message:
-    """Represents a full CHAT_MSG envelope (kept mostly as a plain dict in
-    practice, this dataclass documents the shape used across the app)."""
+    """CHAT_MSG completo"""
 
     type: str
     from_id: str
@@ -98,7 +97,6 @@ class Message:
 
 
 def build_envelope(peer, msg_type: str, group_id: Optional[str], payload: Dict[str, Any], tick: bool = True) -> Dict[str, Any]:
-    """Builds a message envelope, ticking the local Lamport clock."""
     clock = peer.clock.tick() if tick else peer.clock.value
     return {
         "type": msg_type,
