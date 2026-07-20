@@ -66,7 +66,7 @@ class CLI:
         print(f"zKAIP — {self.peer.username} (porta {self.peer.port})")
         print("Comandos: /create <nomeGrupo> <host> <porta> | /add <nomeGrupo> <host> <porta> | "
               "/choose <nomeGrupo> | /msg <texto> | /send <caminho> | /groups | "
-              "/accept <arquivoId> | /reject <arquivoId> | /leave <[>nomeGrupo> | /quit")
+              "/accept <arquivoId> | /reject <arquivoId> | /leave <nomeGrupo> | /quit")
         while self._running:
             try:
                 line = input(self._current_prompt())
