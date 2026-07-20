@@ -1,0 +1,35 @@
+#note: Alice inicia e aguarda o Bob subir
+#pause:5
+#note: Alice cria o grupo Feijoada, convidando o Bob que esta em 127.0.0.1:6002
+#pause:2
+/create Feijoada 127.0.0.1 6002
+#pause:6
+#note: Alice entra na tela do grupo Feijoada com /choose
+#pause:2
+/choose Feijoada
+#pause:5
+/msg Oi Bob, bem-vindo ao zKAIP!
+#pause:6
+/msg Vou te mandar um arquivo de teste agora
+#pause:5
+#note: Alice envia um arquivo para o grupo com /send
+#pause:2
+/send arquivo_teste.txt
+#pause:10
+#note: Agora vamos simular uma falha do Bob - o processo dele vai ser encerrado abruptamente, sem aviso
+#pause:12
+#note: O zKAIP ja deve ter detectado a queda do Bob sozinho, e marcado ele como offline
+#pause:8
+#note: Mesmo com o Bob offline, Alice continua podendo usar o chat normalmente
+#pause:4
+/msg Bob, voce esta ai? Vou mandar mensagens mesmo assim
+#pause:6
+/msg Essas mensagens vao ficar guardadas ate voce reconectar
+#pause:5
+#signal:offline_msgs_sent
+#note: Agora esperamos o Bob reconectar, para mostrar a sincronizacao automatica das mensagens perdidas
+#wait_online:Bob
+#pause:6
+/groups
+#pause:10
+/quit

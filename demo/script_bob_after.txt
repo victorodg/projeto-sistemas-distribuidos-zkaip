@@ -1,0 +1,12 @@
+#note: Bob volta a rodar, com a mesma identidade e a mesma porta de antes
+#pause:6
+#note: Observe a reconexao automatica com a Alice acontecendo sozinha, sem nenhuma acao manual
+#pause:5
+/choose Feijoada
+#pause:8
+#note: As mensagens que a Alice mandou enquanto Bob estava offline aparecem marcadas como [recuperada]
+#pause:6
+/msg Voltei! Recebi as mensagens que ficaram pendentes.
+#pause:6
+/groups
+#pause:8

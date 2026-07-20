@@ -1,0 +1,2 @@
+Este é um arquivo de teste enviado via /send no zKAIP.
+Se você está lendo isso em downloads/, a transferência funcionou!

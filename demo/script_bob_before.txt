@@ -1,0 +1,15 @@
+#note: Bob inicia e aguarda ser convidado pela Alice para o grupo Feijoada
+#wait_group:Feijoada
+#pause:4
+/choose Feijoada
+#pause:5
+/msg Oi Alice, chegou o convite, valeu!
+#pause:6
+#note: A Alice esta enviando um arquivo para o grupo - Bob vai aceitar com /accept
+#wait_offer
+#pause:3
+#accept_last
+#pause:8
+#note: Agora vamos simular uma falha (crash) do Bob - o processo sera encerrado sem desconexao graciosa
+#pause:6
+#crash
